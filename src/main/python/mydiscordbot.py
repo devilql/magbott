@@ -148,7 +148,7 @@ class mydiscordbot(minqlx.Plugin):
         self.add_command("mapend", self.cmd_mapEnd, permission=3)
 
         self.STDMap: list = self.getSTDMap()
-        Plugin.msg(f"Retrieved {len(self.STDMap)} players")
+        self.logger.info(f"Retrieved {len(self.STDMap)} players")
         
         # initialize the discord bot and its interactions on the discord server
         if discord_client is None:
@@ -214,73 +214,19 @@ class mydiscordbot(minqlx.Plugin):
         return list(item_details)
 
     @staticmethod
-    def retrievePlayer(steamID, mapping=None):
-        Plugin.msg(f"Inside retrievePlayer -{steamID} mapping count {len(mapping)}")
+    def retrievePlayer(steamID, mapping):
+        if mapping is None:
+            return ("","")
 
         try:
-            if mapping is None:
-                mapping = mydiscordbot.STDMap
-
-            if mapping is None:
-                Plugin.msg(f"Player not found for steam ID -{steamID}")
-                return ("","")
-                
+               
             for player in mapping:
                 if( player["SteamID"] == steamID ):
-                    Plugin.msg(f"Player found - {player['Name']}")
                     return (player["Name"],player["ID"])
         except Exception as e:
-            Plugin.msg("Exception in retrievePlayer: " + str(e))
+            pass
 
-        Plugin.msg(f"Player not found for steam ID -{steamID}")
         return ("","")
-
-    @staticmethod
-    def groupPlayersByTeam(js, red, blue, spec):
-        '''This method attempts to parse the json retrieved
-        and then group players by teams. red, blue and spec are 
-        output lists ''' 
-        
-        try:
-            playerCount = js['rankedPlayerCount']
-            for i in range(playerCount):
-                team = js['rankedPlayers'][i]['team']
-                if ( team == 1 ):
-                    red.append(js['rankedPlayers'][i]['steamID'])
-                elif team == 2:
-                    blue.append(js['rankedPlayers'][i]['steamID'])
-                else:
-                    spec.append(js['rankedPlayers'][i]['steamID'])
-        except KeyError:
-            print("Error encountered while grouping players")
-
-    def getPlayerNames(js, playerCount):
-        names = ""
-        
-        try:
-            for i in range(playerCount):
-                #magdoll edit for prettier names
-                #names = names + js['rankedPlayers'][i]['name'] +  ", "
-                names = re.sub('(\^)[0-9]', '', names + js['rankedPlayers'][i]['name'] +  ", ")
-        except KeyError:
-            names = ""
-
-        names = names.rstrip(", ")
-        print(names)
-        return names
-
-    def newPlayersFound( serverNames, dbNames ):
-        changeInPlayers = False
-
-        serverNameList = serverNames.split(",")
-        dbNameList = dbNames.split(",")
-        difference = len([(i,j) for i,j in zip(serverNameList,dbNameList) if i!=j] )
-        if difference == 0:
-            print("newPlayersFound = Same as before.")
-        else:
-            changeInPlayers = True
-
-        return changeInPlayers
 
     @staticmethod
     def dbTests():
@@ -453,6 +399,7 @@ class mydiscordbot(minqlx.Plugin):
         """
         content = f"_{discord.utils.escape_markdown(player.clean_name)} connected._"
         self.discord.relay_message(content)
+        self.discord.setDirty()
 
     @minqlx.delay(3)
     def handle_player_disconnect(self, player: minqlx.Player, reason: str) -> None:
@@ -469,6 +416,7 @@ class mydiscordbot(minqlx.Plugin):
             reason_str = f"was kicked ({discord.utils.escape_markdown(Plugin.clean_text(reason))})."
         content = f"_{discord.utils.escape_markdown(player.clean_name)} {reason_str}_"
         self.discord.relay_message(content)
+        self.discord.setDirty()
 
     def handle_map(self, mapname: str, _factory: str) -> None:
         """
@@ -480,10 +428,7 @@ class mydiscordbot(minqlx.Plugin):
         """
         content = f"*Changing map to {discord.utils.escape_markdown(mapname)}...*"
         self.discord.relay_message(content)
-
-        #Plugin.msg("TEMP CODE REMOVE ME")
-        #self.discord.mapstart()
-
+        
     def handle_vote_started(self, caller: Optional[minqlx.Player], vote: str, args: str) -> None:
         """
         Handler called when a vote was started. The method sends a corresponding message to the discord relay channels.
@@ -529,7 +474,7 @@ class mydiscordbot(minqlx.Plugin):
         msgStartOrEnd = mydiscordbot.game_start_or_end(game)
 
         self.discord.relay_message(f"{topic}{top5_players}")
-        #self.discord.processMapStartorEnd(msgStartOrEnd)
+        self.discord.processMapStartorEnd(msgStartOrEnd)
 
     def processMapStartorEnd(self, msgStartOrEnd:str) -> None:
         """
@@ -561,7 +506,7 @@ class mydiscordbot(minqlx.Plugin):
 
         content = "Handling map end"
         self.discord.relay_message(content)
-        #self.discord.mapend()
+        self.discord.mapend()
         return minqlx.RET_NONE
 
     def cmd_discord(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
@@ -686,6 +631,8 @@ class SimpleAsyncDiscord(threading.Thread):
             self.setup_extended_logger()
 
         self.STDMap: list = STDMap
+
+        self.dirty: bool = True
 
     @staticmethod
     def setup_extended_logger() -> None:
@@ -833,42 +780,66 @@ class SimpleAsyncDiscord(threading.Thread):
         await self.discord.tree.sync()
         self.logger.info("Application command tree synced!")
 
-    
+    def setDirty(self):
+        self.dirty = True
+
     @tasks.loop(minutes=2)
     async def periodicStatus(self):
-        #print("periodicStatus - Periodic check")
+        self.logger.debug("periodicStatus() - Periodic check")
+
+        if self.dirty is False:
+            self.logger.debug("periodicStatus() - No new players")
+            return
+
         message_channel = self.discord.get_guild(DEVIL_GUILD_ID).get_channel(DEVIL_CHANNEL_ID)
         if message_channel is None:
-            Plugin.msg("No channel info available")
-        #print(f"periodicStatus - {message_channel}")
+            self.logger.error("periodicStatus() - No channel info available")
         await self.processQL(message_channel, False, None)
+
+        # Set the boolean to indicate we have performed this check
+        self.dirty = False
 
     @periodicStatus.before_loop
     async def beforePeriodicStatus(self):
         await self.discord.wait_until_ready()
         
-    @staticmethod
-    def queryServer( server = None):
+    def queryServer( self, server = None):
+        ''' This method attempts to make a request to the QL Syncore API
+            to retrieve the players currently in the server provided. Defaults
+            to DEFAULTSERVER'''
         if (server is None):
             server = DEFAULTSERVER
             
-        apiurl = f"https://ql.syncore.org/api/qlstats/rankings?servers={server}"
-        data = requests.get(apiurl)
-        js = data.json()
+        try:
+            apiurl = f"https://ql.syncore.org/api/qlstats/rankings?servers={server}"
+            data = requests.get(apiurl)
+            js = data.json()
+        except requests.exceptions.RequestException as e:
+            self.logger.error("queryServer() - Connection error - %s", str(e))
+            js = {}
 
         return js
 
-    @staticmethod
-    def getPlayerCount(js):
+    def groupPlayersByTeam(self, js, red, blue, spec):
+        '''This method attempts to parse the json retrieved
+        and then group players by teams. red, blue and spec are 
+        output lists ''' 
+        
         try:
             playerCount = js['rankedPlayerCount']
+            for i in range(playerCount):
+                team = js['rankedPlayers'][i]['team']
+                if ( team == 1 ):
+                    red.append(js['rankedPlayers'][i]['steamID'])
+                elif team == 2:
+                    blue.append(js['rankedPlayers'][i]['steamID'])
+                else:
+                    spec.append(js['rankedPlayers'][i]['steamID'])
         except KeyError:
-            playerCount = 0
+            self.logger.error("groupPlayersByTeam() - Error encountered while grouping players")
 
-        return playerCount
 
-    @staticmethod
-    def getPlayerNames(js, playerCount):
+    def getPlayerNames(self, js, playerCount):
         names = ""
         
         try:
@@ -880,27 +851,36 @@ class SimpleAsyncDiscord(threading.Thread):
             names = ""
 
         names = names.rstrip(", ")
-        #TODO: Write to log: print(names)
+        self.logger.debug("getPlayerNames() - Names - f{names}")
         return names
 
     async def processQL( self, ctx, force=True, server=None ):
-        #await message.channel.send(message.content[::-1])
-        # TODO: Move below to log
-        Plugin.msg("TEMP - Querying Server")
-        js = self.queryServer()
-        
-        playerCount = self.getPlayerCount(js)
-        names = self.getPlayerNames(js, playerCount)
-
         if ctx is None:
-            print("processQL - can't send this anywhere??")
+            self.logger.error("processQL() - Unable to send output as ctx is None")
         else:
+            self.logger.debug("processQL() - Querying Server")
+                
+            # Query the API to get players and send back the list through discord
+            js = self.queryServer()
+        
+            playerCount = self.getPlayerCount(js)
+            names = self.getPlayerNames(js, playerCount)
+                    
             await self.writePlayerInfo(ctx, playerCount, names, server, force )
+
+    def getPlayerCount(self, js):
+        try:
+            playerCount = js['rankedPlayerCount']
+        except KeyError:
+            self.logger.error("getPlayerCount() - No player count received")
+            playerCount = 0
+
+        return playerCount
 
     async def writePlayerInfo(self, ctx, playerCount, names, server, force):
 
         if ctx is None:
-            print("writePlayerInfo - None received in ctx")
+            self.logger.error("writePlayerInfo - None received in ctx")
         
         if ( force is False ):
             writeOutput = False
@@ -920,6 +900,7 @@ class SimpleAsyncDiscord(threading.Thread):
         if writeOutput is True:
             await self.prettyPrint( ctx, server, playerCount, names )
         
+        # save this info so we can compare it during the next periodic check
         self.PlayerCount = playerCount
         self.PlayerNames = names
 
@@ -930,7 +911,7 @@ class SimpleAsyncDiscord(threading.Thread):
         dbNameList = dbNames.split(",")
         difference = len([(i,j) for i,j in zip(serverNameList,dbNameList) if i!=j] )
         if difference == 0:
-            print("newPlayersFound = Same as before.")
+            self.logger.debug("newPlayersFound = Same as before.")
         else:
             changeInPlayers = True
 
@@ -950,8 +931,7 @@ class SimpleAsyncDiscord(threading.Thread):
                 temp = temp + f"""\n```{players}\n```"""
             await ctx.send(temp)
         else:
-            # TODO - Move below to log
-            Plugin.msg("prettyPrint() - ctx is not present. Can't send message")
+            self.logger.error("prettyPrint() - ctx is not present. Can't send message")
 
     async def on_message(self, message) -> None:
         """
@@ -1229,73 +1209,74 @@ class SimpleAsyncDiscord(threading.Thread):
 
 
     def mapstart(self):
-        Plugin.msg(f"TEMPCODE - Inside mapstart")
+        self.logger.debug(f"mapstart() - Inside mapstart")
         server = self.discord.get_guild(DEVIL_GUILD_ID)
         generalChannel = discord.utils.get(server.voice_channels, id=DEVIL_GENERAL_VOICE_ID)
         voiceMembers = generalChannel.members
         if (len(voiceMembers) == 0 ):
             # Absolutely nothing else to do if no one is in voice
-            Plugin.msg(f"There are no members in general")
+            self.logger.debug(f"mapstart() - There are no members in general")
             return
-        else:
-            for member in voiceMembers:
-                Plugin.msg(f"{member.name}{member.discriminator}")
-
         
         js = self.queryServer()
         red = []
         blue = []
         spec = []
-        mydiscordbot.groupPlayersByTeam(js, red, blue, spec)
+        self.groupPlayersByTeam(js, red, blue, spec)
         
         map = self.STDMap
-        Plugin.msg(f"There are {len(voiceMembers)} in general. {len(map)} in db")
+        self.logger.debug(f"There are {len(voiceMembers)} in general. {len(map)} in db")
         blueChannel = discord.utils.get(server.voice_channels, id=DEVIL_BLUE_VOICE_ID)
         redChannel = discord.utils.get(server.voice_channels, id=DEVIL_RED_VOICE_ID)
         
-        asyncio.run_coroutine_threadsafe(self.moveBluePlayers(blue, map, voiceMembers, blueChannel), loop=self.discord.loop)
-        asyncio.run_coroutine_threadsafe(self.moveRedPlayers(red, map, voiceMembers, redChannel), loop=self.discord.loop)
+        asyncio.run_coroutine_threadsafe(self.movePlayers(blue, map, voiceMembers, blueChannel, "blue"), loop=self.discord.loop)
+        asyncio.run_coroutine_threadsafe(self.movelayers(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
+
+        Plugin.msg("Map Start - Switching users in discord from General to Red/Blue")
         
 
-    async def moveBluePlayers(self, blue, map, voiceMembers, blueChannel):
-        Plugin.msg( f"Inside moveBluePlayers - {len(blue)}  voice: {len(voiceMembers)}")
-        for steamID in blue:
-            Plugin.msg(f"Querying steam ID - {steamID}")
+    async def movePlayers(self, playerList, map, voiceMembers, channel, channelName):
+        self.logger.debug( f"movePlayers() - Inside movePlayers - {len(playerList)}  voice: {len(voiceMembers)}")
+        for steamID in playerList:
+            self.logger.debug(f"movePlayers() - Querying steam ID - {steamID}")
             (playerName, playerID) = mydiscordbot.retrievePlayer(steamID, map)
-            Plugin.msg(f"{playerName}{playerID}")
+            self.logger.debug(f"movePlayers() - query result: {playerName}{playerID}")
             if len(playerName) > 0:
-                await self.movePlayerToBlue(playerName, playerID, voiceMembers, blueChannel)
+                await self.movePlayer(playerName, playerID, voiceMembers, channel, channelName)
             else:
-                print("Unknown steamID - {steamID}")
+                self.logger.error("moveBluePlayers() - Unknown steamID - {steamID}")
 
-    async def moveRedPlayers(self, red, map, voiceMembers, redChannel):
-        Plugin.msg( f"Inside moveRedPlayers - {len(red)} voice: {len(voiceMembers)}")
-        for steamID in red:
-            Plugin.msg(f"Querying steam ID - {steamID}")
-            (playerName, playerID) = mydiscordbot.retrievePlayer(steamID, map)
-            Plugin.msg(f"{playerName}{playerID}")
-            if len(playerName) > 0:
-                await self.movePlayerToRed(playerName, playerID, voiceMembers, redChannel)
-            else:
-                print(f"Unknown steamID - {steamID}")
+    async def movePlayer(self, playerName, playerID, voiceMembers, channel, channelName):
+        for member in voiceMembers:
+            if member.discriminator == playerID and member.name == playerName:
+                self.logger.debug(f"Moving {playerName}{playerID} to {channelName} voice channel")
+                await member.move_to(channel)            
+                return
+
+        self.logger.debug(f"{playerName}{playerID} not in General")
+
+    def mapEnd(self):
+        '''This method is called when a map ends.
+        It will automatically move players in Red/Blue channels
+        to general whether they like it or not!'''
+        asyncio.run_coroutine_threadsafe(self.movePlayersToGeneral(), loop=self.discord.loop)
+
+        Plugin.msg("Map End - Switching users in discord from Red/Blue to General")
+        
+    async def movePlayersToGeneral(self):
+        # Get red players
+        server = self.discord.get_guild(MAGDOLL_GUILD_ID)
+        generalChannel = discord.utils.get(server.voice_channels, id=MAGDOLL_GENERAL_VOICE_ID)
+        blueChannel = discord.utils.get(server.voice_channels, id=MAGDOLL_BLUE_VOICE_ID)
+        redChannel = discord.utils.get(server.voice_channels, id=MAGDOLL_RED_VOICE_ID)
+
+        for player in redChannel.members:
+            self.logger.debug(f"Moving {player.name}{player.discriminator} to general")
+            await player.move_to(generalChannel)
+        for player in blueChannel.members:
+            self.logger.debug(f"Moving {player.name}{player.discriminator} to general")
+            await player.move_to(generalChannel)
 
         return
 
-    async def movePlayerToRed(self, playerName, playerID, voiceMembers, redChannel):
-        for member in voiceMembers:
-            if member.discriminator == playerID and member.name == playerName:
-                Plugin.msg(f"Moving {playerName}{playerID} to red voice channel")
-                await member.move_to(redChannel)            
-                return
-
-        Plugin.msg(f"{playerName}{playerID} not in General")
-
-    async def movePlayerToBlue(self, playerName, playerID, voiceMembers, blueChannel):
-        for member in voiceMembers:
-            if member.discriminator == playerID and member.name == playerName:
-                Plugin.Msg(f"Moving {playerName}{playerID} to blue voice channel")
-                await member.move_to(blueChannel)
-                return
-        Plugin.Msg(f"{playerName}{playerID} not in General")
-
-
+    
