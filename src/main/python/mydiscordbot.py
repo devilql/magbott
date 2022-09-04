@@ -634,6 +634,26 @@ class SimpleAsyncDiscord(threading.Thread):
 
         self.dirty: bool = True
 
+        self.setServer("magdoll")
+        #self.setServer("devil")
+
+    def setServer(self, serverName: str) -> None:
+        '''
+        Silly method to switch discord servers for running quick tests
+        '''
+        if serverName == "magdoll":
+            self.GUILD_ID = MAGDOLL_GUILD_ID
+            self.MAGDOLL_CHANNEL_ID = MAGDOLL_CHANNEL_ID
+            self.GENERAL_VOICE_ID = MAGDOLL_GENERAL_VOICE_ID
+            self.RED_VOICE_ID = MAGDOLL_RED_VOICE_ID
+            self.BLUE_VOICE_ID = MAGDOLL_BLUE_VOICE_ID
+        else:
+            self.GUILD_ID = DEVIL_GUILD_ID
+            self.MAGDOLL_CHANNEL_ID = DEVIL_CHANNEL_ID
+            self.GENERAL_VOICE_ID = DEVIL_GENERAL_VOICE_ID
+            self.RED_VOICE_ID = DEVIL_RED_VOICE_ID
+            self.BLUE_VOICE_ID = DEVIL_BLUE_VOICE_ID
+
     @staticmethod
     def setup_extended_logger() -> None:
         discord_logger: logging.Logger = logging.getLogger("discord")
