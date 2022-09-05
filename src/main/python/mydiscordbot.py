@@ -40,7 +40,7 @@ import pymongo
 from pymongo import MongoClient
 import requests
 
-plugin_version = "v2.1.7"
+plugin_version = "v3.0.1"
 
 DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -643,13 +643,13 @@ class SimpleAsyncDiscord(threading.Thread):
         '''
         if serverName == "magdoll":
             self.GUILD_ID = MAGDOLL_GUILD_ID
-            self.MAGDOLL_CHANNEL_ID = MAGDOLL_CHANNEL_ID
+            self.CHANNEL_ID = MAGDOLL_CHANNEL_ID
             self.GENERAL_VOICE_ID = MAGDOLL_GENERAL_VOICE_ID
             self.RED_VOICE_ID = MAGDOLL_RED_VOICE_ID
             self.BLUE_VOICE_ID = MAGDOLL_BLUE_VOICE_ID
         else:
             self.GUILD_ID = DEVIL_GUILD_ID
-            self.MAGDOLL_CHANNEL_ID = DEVIL_CHANNEL_ID
+            self.CHANNEL_ID = DEVIL_CHANNEL_ID
             self.GENERAL_VOICE_ID = DEVIL_GENERAL_VOICE_ID
             self.RED_VOICE_ID = DEVIL_RED_VOICE_ID
             self.BLUE_VOICE_ID = DEVIL_BLUE_VOICE_ID
@@ -706,10 +706,11 @@ class SimpleAsyncDiscord(threading.Thread):
         loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        members_intent: bool = self.discord_replace_relayed_mentions or self.discord_replace_triggered_mentions
+        #members_intent: bool = self.discord_replace_relayed_mentions or self.discord_replace_triggered_mentions
+        members_intent = True
         intents: discord.Intents = \
             discord.Intents(members=members_intent, guilds=True, bans=False, emojis=False, integrations=False,
-                            webhooks=False, invites=False, voice_states=False, presences=True, messages=True,
+                            webhooks=False, invites=False, voice_states=True, presences=True, messages=True,
                             guild_messages=True, dm_messages=True, reactions=False, guild_reactions=False,
                             dm_reactions=False, typing=False, guild_typing=False, dm_typing=False)
         # disabled message_content and guild_scheduled_events in the Intents call above.
@@ -1230,8 +1231,8 @@ class SimpleAsyncDiscord(threading.Thread):
 
     def mapstart(self):
         self.logger.debug(f"mapstart() - Inside mapstart")
-        server = self.discord.get_guild(DEVIL_GUILD_ID)
-        generalChannel = discord.utils.get(server.voice_channels, id=DEVIL_GENERAL_VOICE_ID)
+        server = self.discord.get_guild(self.GUILD_ID)
+        generalChannel = discord.utils.get(server.voice_channels, id=self.GENERAL_VOICE_ID)
         voiceMembers = generalChannel.members
         if (len(voiceMembers) == 0 ):
             # Absolutely nothing else to do if no one is in voice
@@ -1246,13 +1247,13 @@ class SimpleAsyncDiscord(threading.Thread):
         
         map = self.STDMap
         self.logger.debug(f"There are {len(voiceMembers)} in general. {len(map)} in db")
-        blueChannel = discord.utils.get(server.voice_channels, id=DEVIL_BLUE_VOICE_ID)
-        redChannel = discord.utils.get(server.voice_channels, id=DEVIL_RED_VOICE_ID)
+        blueChannel = discord.utils.get(server.voice_channels, id=self.BLUE_VOICE_ID)
+        redChannel = discord.utils.get(server.voice_channels, id=self.RED_VOICE_ID)
         
         asyncio.run_coroutine_threadsafe(self.movePlayers(blue, map, voiceMembers, blueChannel, "blue"), loop=self.discord.loop)
-        asyncio.run_coroutine_threadsafe(self.movelayers(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
+        asyncio.run_coroutine_threadsafe(self.movePlayers(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
 
-        Plugin.msg("Map Start - Switching users in discord from General to Red/Blue")
+        Plugin.msg("Map Start - Switching players in discord from General to Red/Blue")
         
 
     async def movePlayers(self, playerList, map, voiceMembers, channel, channelName):
@@ -1270,32 +1271,37 @@ class SimpleAsyncDiscord(threading.Thread):
         for member in voiceMembers:
             if member.discriminator == playerID and member.name == playerName:
                 self.logger.debug(f"Moving {playerName}{playerID} to {channelName} voice channel")
-                await member.move_to(channel)            
+                #await member.move_to(channel)            
+                asyncio.run_coroutine_threadsafe(member.move_to(channel), loop=self.discord.loop)
                 return
 
         self.logger.debug(f"{playerName}{playerID} not in General")
 
-    def mapEnd(self):
+    def mapend(self):
         '''This method is called when a map ends.
         It will automatically move players in Red/Blue channels
         to general whether they like it or not!'''
         asyncio.run_coroutine_threadsafe(self.movePlayersToGeneral(), loop=self.discord.loop)
 
-        Plugin.msg("Map End - Switching users in discord from Red/Blue to General")
+        Plugin.msg("Map End - Switching players in discord back from Red/Blue to General")
         
     async def movePlayersToGeneral(self):
-        # Get red players
-        server = self.discord.get_guild(MAGDOLL_GUILD_ID)
-        generalChannel = discord.utils.get(server.voice_channels, id=MAGDOLL_GENERAL_VOICE_ID)
-        blueChannel = discord.utils.get(server.voice_channels, id=MAGDOLL_BLUE_VOICE_ID)
-        redChannel = discord.utils.get(server.voice_channels, id=MAGDOLL_RED_VOICE_ID)
+        
+        self.logger.debug( f"movePlayersToGeneral() - Executing thread to move players back to general")
+
+        server = self.discord.get_guild(self.GUILD_ID)
+        generalChannel = discord.utils.get(server.voice_channels, id=self.GENERAL_VOICE_ID)
+        blueChannel = discord.utils.get(server.voice_channels, id=self.BLUE_VOICE_ID)
+        redChannel = discord.utils.get(server.voice_channels, id=self.RED_VOICE_ID)
 
         for player in redChannel.members:
             self.logger.debug(f"Moving {player.name}{player.discriminator} to general")
-            await player.move_to(generalChannel)
+            #await player.move_to(generalChannel)
+            asyncio.run_coroutine_threadsafe(player.move_to(generalChannel), loop=self.discord.loop)
         for player in blueChannel.members:
             self.logger.debug(f"Moving {player.name}{player.discriminator} to general")
-            await player.move_to(generalChannel)
+            #await player.move_to(generalChannel)
+            asyncio.run_coroutine_threadsafe(player.move_to(generalChannel), loop=self.discord.loop)
 
         return
 
