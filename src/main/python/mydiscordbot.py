@@ -195,7 +195,7 @@ class mydiscordbot(minqlx.Plugin):
         item_details = collection_name.find()
         for item in item_details:
             try:
-                if item["ID"] == ID and item["Name"] == name:
+                if item["ID"] == ID and item["Name"].casefold() == name.casefold():
                     return item["SteamID"]
             except:
                 continue
@@ -474,7 +474,7 @@ class mydiscordbot(minqlx.Plugin):
         msgStartOrEnd = mydiscordbot.game_start_or_end(game)
 
         self.discord.relay_message(f"{topic}{top5_players}")
-        self.discord.processMapStartorEnd(msgStartOrEnd)
+        self.processMapStartorEnd(msgStartOrEnd)
 
     def processMapStartorEnd(self, msgStartOrEnd:str) -> None:
         """
@@ -1265,11 +1265,11 @@ class SimpleAsyncDiscord(threading.Thread):
             if len(playerName) > 0:
                 await self.movePlayer(playerName, playerID, voiceMembers, channel, channelName)
             else:
-                self.logger.error("moveBluePlayers() - Unknown steamID - {steamID}")
+                self.logger.error(f"moveBluePlayers() - Unknown steamID - {steamID}")
 
     async def movePlayer(self, playerName, playerID, voiceMembers, channel, channelName):
         for member in voiceMembers:
-            if member.discriminator == playerID and member.name == playerName:
+            if member.discriminator == playerID and member.name.casefold() == playerName.casefold():
                 self.logger.debug(f"Moving {playerName}{playerID} to {channelName} voice channel")
                 #await member.move_to(channel)            
                 asyncio.run_coroutine_threadsafe(member.move_to(channel), loop=self.discord.loop)
