@@ -40,7 +40,7 @@ import pymongo
 from pymongo import MongoClient
 import requests
 
-plugin_version = "v3.0.1"
+plugin_version = "v3.0.2"
 
 DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -460,7 +460,7 @@ class mydiscordbot(minqlx.Plugin):
 
         self.discord.relay_message(content)
 
-    @minqlx.delay(5)
+    @minqlx.delay(9)
     def handle_game_countdown_or_end(self, *_args, **_kwargs) -> None:
         """
         Handler called when the game is in countdown, i.e. about to start. This function mainly updates the topics of
@@ -476,6 +476,7 @@ class mydiscordbot(minqlx.Plugin):
         self.discord.relay_message(f"{topic}{top5_players}")
         self.processMapStartorEnd(msgStartOrEnd)
 
+    @minqlx.thread
     def processMapStartorEnd(self, msgStartOrEnd:str) -> None:
         """
         Called to switch players around discord voice channels when a map is starting or ending
@@ -747,7 +748,7 @@ class SimpleAsyncDiscord(threading.Thread):
                                             ignore_extra=False,
                                             help="display the plugin's version information"))
 
-            discord_bot.add_command(Command(self.processQL, name="getplayers",
+            discord_bot.add_command(Command(self.processQL, name="ql",
                                             pass_context=True,
                                             ignore_extra=False,
                                             help="display the plugin's version information"))
@@ -812,7 +813,7 @@ class SimpleAsyncDiscord(threading.Thread):
             self.logger.debug("periodicStatus() - No new players")
             return
 
-        message_channel = self.discord.get_guild(DEVIL_GUILD_ID).get_channel(DEVIL_CHANNEL_ID)
+        message_channel = self.discord.get_guild(self.GUILD_ID).get_channel(self.CHANNEL_ID)
         if message_channel is None:
             self.logger.error("periodicStatus() - No channel info available")
         await self.processQL(message_channel, False, None)
@@ -872,7 +873,7 @@ class SimpleAsyncDiscord(threading.Thread):
             names = ""
 
         names = names.rstrip(", ")
-        self.logger.debug("getPlayerNames() - Names - f{names}")
+        self.logger.debug(f"getPlayerNames() - Names - {names}")
         return names
 
     async def processQL( self, ctx, force=True, server=None ):
