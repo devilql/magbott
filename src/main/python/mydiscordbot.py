@@ -39,8 +39,9 @@ from discord.ext import tasks
 import pymongo
 from pymongo import MongoClient
 import requests
+import time
 
-plugin_version = "v3.0.2"
+plugin_version = "v3.0.5"
 
 DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -460,7 +461,7 @@ class mydiscordbot(minqlx.Plugin):
 
         self.discord.relay_message(content)
 
-    @minqlx.delay(9)
+    @minqlx.delay(7)
     def handle_game_countdown_or_end(self, *_args, **_kwargs) -> None:
         """
         Handler called when the game is in countdown, i.e. about to start. This function mainly updates the topics of
@@ -481,6 +482,7 @@ class mydiscordbot(minqlx.Plugin):
         """
         Called to switch players around discord voice channels when a map is starting or ending
         """
+        time.sleep(5)
         if msgStartOrEnd == "mapstart":
             self.discord.mapstart()
         elif msgStartOrEnd == "mapend":
@@ -634,6 +636,9 @@ class SimpleAsyncDiscord(threading.Thread):
         self.STDMap: list = STDMap
 
         self.dirty: bool = True
+
+        self.PlayerCount: int = 0
+        self.PlayerNames: str = ""
 
         self.setServer("magdoll")
         #self.setServer("devil")
@@ -809,14 +814,13 @@ class SimpleAsyncDiscord(threading.Thread):
     async def periodicStatus(self):
         self.logger.debug("periodicStatus() - Periodic check")
 
-        if self.dirty is False:
+        if self.dirty is True:
+            message_channel = self.discord.get_guild(self.GUILD_ID).get_channel(self.CHANNEL_ID)
+            if message_channel is None:
+                self.logger.error("periodicStatus() - No channel info available")
+            await self.processQL(message_channel, False, None)
+        else:
             self.logger.debug("periodicStatus() - No new players")
-            return
-
-        message_channel = self.discord.get_guild(self.GUILD_ID).get_channel(self.CHANNEL_ID)
-        if message_channel is None:
-            self.logger.error("periodicStatus() - No channel info available")
-        await self.processQL(message_channel, False, None)
 
         # Set the boolean to indicate we have performed this check
         self.dirty = False
@@ -881,6 +885,12 @@ class SimpleAsyncDiscord(threading.Thread):
             self.logger.error("processQL() - Unable to send output as ctx is None")
         else:
             self.logger.debug("processQL() - Querying Server")
+
+            #Temp code
+            #self.logger.debug(f"movePlayers() - Querying steam ID - 76561198067419604")
+            #(playerName, playerID) = mydiscordbot.retrievePlayer("76561198067419604", self.STDMap)
+            #self.logger.debug(f"movePlayers() - query result: {playerName}{playerID}")
+            #temp code end
                 
             # Query the API to get players and send back the list through discord
             js = self.queryServer()
