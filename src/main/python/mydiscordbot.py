@@ -40,8 +40,9 @@ import pymongo
 from pymongo import MongoClient
 import requests
 import time
+import schedule
 
-plugin_version = "v3.0.5"
+plugin_version = "v3.0.8"
 
 DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -147,6 +148,8 @@ class mydiscordbot(minqlx.Plugin):
                          usage="[status]|connect|disconnect|reconnect")
         self.add_command("mapstart", self.cmd_mapStart, permission=3)
         self.add_command("mapend", self.cmd_mapEnd, permission=3)
+        self.add_command("addplayer", self.cmd_addPlayer, permission=3)
+        #self.add_command("getsteam", self.cmd_getSteam, permission=3)
 
         self.STDMap: list = self.getSTDMap()
         self.logger.info(f"Retrieved {len(self.STDMap)} players")
@@ -250,6 +253,8 @@ class mydiscordbot(minqlx.Plugin):
         """
         if plugin == self.__class__.__name__:
             self.discord.stop()
+
+        schedule.clear()
 
     @staticmethod
     def game_status_information(game: minqlx.Game) -> str:
@@ -501,6 +506,26 @@ class mydiscordbot(minqlx.Plugin):
         return minqlx.RET_NONE
 
     @minqlx.thread
+    def cmd_addPlayer(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
+        """
+        Handler of the !addPlayer command. The method adds given player's discord and steam info to the db
+        """
+        if len(msg) < 4:
+            return minqlx.RET_USAGE
+
+        ID = msg[1]
+        name = msg[2]
+        steamID = msg[3]
+
+        mydiscordbot.addPlayer(ID, name, steamID)
+        self.msg(f"Added player {name}")
+
+        self.STDMap = self.getSTDMap()
+        self.msg(f"Retrieved {len(self.STDMap)} players")
+
+        return minqlx.RET_NONE
+
+    @minqlx.thread
     def cmd_mapEnd(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
         """
         Handler of the !mapend command. The method then switches players around in discord
@@ -642,6 +667,18 @@ class SimpleAsyncDiscord(threading.Thread):
 
         self.setServer("magdoll")
         #self.setServer("devil")
+
+    async def schedulePeriodicStatus(self):
+        self.job = schedule.every(1).minute.do(self.callPeriodicStatus)
+        
+        threading.Thread(target=self.run_schedule).start()
+        self.logger.info(f"Scheduled to run periodic status every min")
+
+    def run_schedule(self):
+        self.logger.info(f"Schedule monitoring thread successfully started")
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
 
     def setServer(self, serverName: str) -> None:
         '''
@@ -800,7 +837,7 @@ class SimpleAsyncDiscord(threading.Thread):
         self.logger.info(f"Logged in to discord as: {self.discord.user.name} ({self.discord.user.id})")
         Plugin.msg("Connected to discord")
 
-        self.periodicStatus.start()
+        await self.schedulePeriodicStatus()
 
         ready_actions.append(self.discord.change_presence(activity=discord.Game(name="Quake Live")))
         await asyncio.gather(*ready_actions)
@@ -810,25 +847,24 @@ class SimpleAsyncDiscord(threading.Thread):
     def setDirty(self):
         self.dirty = True
 
-    @tasks.loop(minutes=2)
+    def callPeriodicStatus(self):
+        asyncio.run_coroutine_threadsafe(self.periodicStatus(), loop=self.discord.loop)
+
     async def periodicStatus(self):
         self.logger.debug("periodicStatus() - Periodic check")
 
         if self.dirty is True:
+            self.logger.debug("periodicStatus() - someone must have connected/disconnected since the last check")
             message_channel = self.discord.get_guild(self.GUILD_ID).get_channel(self.CHANNEL_ID)
             if message_channel is None:
                 self.logger.error("periodicStatus() - No channel info available")
             await self.processQL(message_channel, False, None)
         else:
-            self.logger.debug("periodicStatus() - No new players")
+            self.logger.debug("periodicStatus() - No connects/disconnects")
 
         # Set the boolean to indicate we have performed this check
         self.dirty = False
 
-    @periodicStatus.before_loop
-    async def beforePeriodicStatus(self):
-        await self.discord.wait_until_ready()
-        
     def queryServer( self, server = None):
         ''' This method attempts to make a request to the QL Syncore API
             to retrieve the players currently in the server provided. Defaults
@@ -911,20 +947,25 @@ class SimpleAsyncDiscord(threading.Thread):
 
     async def writePlayerInfo(self, ctx, playerCount, names, server, force):
 
+        attributeerror = False
+
         if ctx is None:
             self.logger.error("writePlayerInfo - None received in ctx")
         
         if ( force is False ):
             writeOutput = False
+            #self.logger.debug(f"writePlayerInfo - force is false, playerCount, names = {playerCount} {names}")
             try:
                 dbPlayerCount = self.PlayerCount
                 dbPlayerNames = self.PlayerNames
+                #self.logger.debug(f"writePlayerInfo - dbPlayerCount, dbPlayerNames = {dbPlayerCount}, {dbPlayerNames}")
             except AttributeError:
                 dbPlayerCount = 0
                 dbPlayerNames = ""
                 attributeerror = True
+                #self.logger.debug(f"writePlayerInfo - dbPlayerCount, dbPlayerNames not found")
 
-            if ( ( attributeerror == True ) or ( playerCount != dbPlayerCount ) or self.newPlayersFound( names, dbPlayerNames) ) :
+            if ( ( attributeerror ) or ( playerCount != dbPlayerCount ) or self.newPlayersFound( names, dbPlayerNames) ) :
                 writeOutput = True
         else:
             writeOutput = True
