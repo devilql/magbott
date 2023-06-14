@@ -42,7 +42,7 @@ import requests
 import time
 import schedule
 
-plugin_version = "v3.0.8"
+plugin_version = "v3.0.9"
 
 DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -147,8 +147,10 @@ class mydiscordbot(minqlx.Plugin):
         self.add_command("discordbot", self.cmd_discordbot, permission=1,
                          usage="[status]|connect|disconnect|reconnect")
         self.add_command("mapstart", self.cmd_mapStart, permission=3)
+        self.add_command("mapstart2", self.cmd_mapStart2, permission=3)
         self.add_command("mapend", self.cmd_mapEnd, permission=3)
         self.add_command("addplayer", self.cmd_addPlayer, permission=3)
+        self.add_command("addplayer2", self.cmd_addPlayer2, permission=3)
         #self.add_command("getsteam", self.cmd_getSteam, permission=3)
 
         self.STDMap: list = self.getSTDMap()
@@ -192,6 +194,17 @@ class mydiscordbot(minqlx.Plugin):
         collection_name.insert_one(player)
 
     @staticmethod
+    def addPlayer2( discordID, name, steamID ):
+        player = {}
+        player["DiscordID"] = discordID
+        player["Name"] = name
+        player["SteamID"] = steamID
+
+        dbname = mydiscordbot.get_database()
+        collection_name = dbname["steam"]
+        collection_name.insert_one(player)
+
+    @staticmethod
     def getSteamID( ID:str, name:str ):
         dbname = mydiscordbot.get_database()
         collection_name = dbname["steam"]
@@ -200,6 +213,20 @@ class mydiscordbot(minqlx.Plugin):
         for item in item_details:
             try:
                 if item["ID"] == ID and item["Name"].casefold() == name.casefold():
+                    return item["SteamID"]
+            except:
+                continue
+
+        return 0
+    
+    @staticmethod
+    def getSteamID2( discordID: str ):
+        dbname = mydiscordbot.get_database()
+        collection_name = dbname["steam"]
+
+        item_details = collection_name.find()
+        for item in item_details:
+            try:
                     return item["SteamID"]
             except:
                 continue
@@ -231,11 +258,29 @@ class mydiscordbot(minqlx.Plugin):
             pass
 
         return ("","")
+    
+    @staticmethod
+    def retrievePlayer2(steamID, mapping):
+        if mapping is None:
+            return 0
+
+        try:
+               
+            for player in mapping:
+                if( player["SteamID"] == steamID ):
+                    return (player["DiscordID"])
+        except Exception as e:
+            pass
+
+        return 0
 
     @staticmethod
     def dbTests():
         steamid = mydiscordbot.getSteamID("0795", "Dev!l")
         Plugin.msg(f"Dev!l's steam ID is {steamid}")
+
+        steamid2 = mydiscordbot.getSteamID2("36476318855593984")
+        Plugin.msg(f"Dev!l's steam ID 2 is {steamid}")
 
         steamid = mydiscordbot.getSteamID("9999", "abdulla")
         Plugin.msg(f"abdulla's steam ID is {steamid}")
@@ -489,7 +534,7 @@ class mydiscordbot(minqlx.Plugin):
         """
         time.sleep(5)
         if msgStartOrEnd == "mapstart":
-            self.discord.mapstart()
+            self.discord.mapstart2()
         elif msgStartOrEnd == "mapend":
             self.discord.mapend()
 
@@ -503,6 +548,18 @@ class mydiscordbot(minqlx.Plugin):
         content = "Handling map start"
         self.discord.relay_message(content)
         self.discord.mapstart()
+        return minqlx.RET_NONE
+    
+    @minqlx.thread
+    def cmd_mapStart2(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
+        """
+        Handler of the !mapstart2 command. The method then switches players around in discord
+        voice channels to match teams they are in
+        """
+
+        content = "Handling map start 2"
+        self.discord.relay_message(content)
+        self.discord.mapstart2()
         return minqlx.RET_NONE
 
     @minqlx.thread
@@ -518,6 +575,26 @@ class mydiscordbot(minqlx.Plugin):
         steamID = msg[3]
 
         mydiscordbot.addPlayer(ID, name, steamID)
+        self.msg(f"Added player {name}")
+
+        self.STDMap = self.getSTDMap()
+        self.msg(f"Retrieved {len(self.STDMap)} players")
+
+        return minqlx.RET_NONE
+    
+    @minqlx.thread
+    def cmd_addPlayer2(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
+        """
+        Handler of the !addPlayer2 command. The method adds given player's discord and steam info to the db
+        """
+        if len(msg) < 4:
+            return minqlx.RET_USAGE
+
+        discordID = msg[1]
+        name = msg[2]
+        steamID = msg[3]
+
+        mydiscordbot.addPlayer2(discordID, name, steamID)
         self.msg(f"Added player {name}")
 
         self.STDMap = self.getSTDMap()
@@ -1306,6 +1383,32 @@ class SimpleAsyncDiscord(threading.Thread):
         asyncio.run_coroutine_threadsafe(self.movePlayers(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
 
         Plugin.msg("Map Start - Switching players in discord from General to Red/Blue")
+
+    def mapstart2(self):
+        self.logger.debug(f"mapstart2() - Inside mapstart")
+        server = self.discord.get_guild(self.GUILD_ID)
+        generalChannel = discord.utils.get(server.voice_channels, id=self.GENERAL_VOICE_ID)
+        voiceMembers = generalChannel.members
+        if (len(voiceMembers) == 0 ):
+            # Absolutely nothing else to do if no one is in voice
+            self.logger.debug(f"mapstart2() - There are no members in general")
+            return
+        
+        js = self.queryServer()
+        red = []
+        blue = []
+        spec = []
+        self.groupPlayersByTeam(js, red, blue, spec)
+        
+        map = self.STDMap
+        self.logger.debug(f"There are {len(voiceMembers)} in general. {len(map)} in db")
+        blueChannel = discord.utils.get(server.voice_channels, id=self.BLUE_VOICE_ID)
+        redChannel = discord.utils.get(server.voice_channels, id=self.RED_VOICE_ID)
+        
+        asyncio.run_coroutine_threadsafe(self.movePlayers2(blue, map, voiceMembers, blueChannel, "blue"), loop=self.discord.loop)
+        asyncio.run_coroutine_threadsafe(self.movePlayers2(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
+
+        Plugin.msg("Map Start 2 - Switching players in discord from General to Red/Blue")
         
 
     async def movePlayers(self, playerList, map, voiceMembers, channel, channelName):
@@ -1314,10 +1417,22 @@ class SimpleAsyncDiscord(threading.Thread):
             self.logger.debug(f"movePlayers() - Querying steam ID - {steamID}")
             (playerName, playerID) = mydiscordbot.retrievePlayer(steamID, map)
             self.logger.debug(f"movePlayers() - query result: {playerName}{playerID}")
+            
             if len(playerName) > 0:
                 await self.movePlayer(playerName, playerID, voiceMembers, channel, channelName)
             else:
-                self.logger.error(f"moveBluePlayers() - Unknown steamID - {steamID}")
+                self.logger.error(f"movePlayers() - Unknown steamID - {steamID}")
+
+    async def movePlayers2(self, playerList, map, voiceMembers, channel, channelName):
+        self.logger.debug( f"movePlayers2() - Inside movePlayers - {len(playerList)}  voice: {len(voiceMembers)}")
+        for steamID in playerList:
+            self.logger.debug(f"movePlayers2() - Querying steam ID - {steamID}")
+            discordID = mydiscordbot.retrievePlayer2(steamID, map)
+            self.logger.debug(f"movePlayers2() - query result: {discordID}")
+            if discordID > 0:
+                await self.movePlayer2(discordID, voiceMembers, channel, channelName)
+            else:
+                self.logger.error(f"movePlayers2() - Unknown steamID - {steamID}")
 
     async def movePlayer(self, playerName, playerID, voiceMembers, channel, channelName):
         for member in voiceMembers:
@@ -1328,6 +1443,16 @@ class SimpleAsyncDiscord(threading.Thread):
                 return
 
         self.logger.debug(f"{playerName}{playerID} not in General")
+
+    async def movePlayer2(self, discordID, voiceMembers, channel, channelName):
+        for member in voiceMembers:
+            if member.ID == int(discordID):
+                self.logger.debug(f"Moving {member.name} to {channelName} voice channel")
+                #await member.move_to(channel)            
+                asyncio.run_coroutine_threadsafe(member.move_to(channel), loop=self.discord.loop)
+                return
+
+        self.logger.debug(f"{member.name} with {discordID} not in General")
 
     def mapend(self):
         '''This method is called when a map ends.
