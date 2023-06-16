@@ -42,7 +42,7 @@ import requests
 import time
 import schedule
 
-plugin_version = "v3.0.9"
+plugin_version = "v3.0.10"
 
 DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -1069,7 +1069,7 @@ class SimpleAsyncDiscord(threading.Thread):
 
     async def prettyPrint(self, ctx, server, count, players):
         if server is None or server == DEFAULTSERVER:
-            server = "pub.quakectf.com:27960"
+            server = "chi-pub.quakectf.com:27960"
             
         if ctx is not None:
             temp = ""
@@ -1424,12 +1424,12 @@ class SimpleAsyncDiscord(threading.Thread):
                 self.logger.error(f"movePlayers() - Unknown steamID - {steamID}")
 
     async def movePlayers2(self, playerList, map, voiceMembers, channel, channelName):
-        self.logger.debug( f"movePlayers2() - Inside movePlayers - {len(playerList)}  voice: {len(voiceMembers)}")
+        self.logger.debug( f"movePlayers2() - Inside movePlayers2 - {len(playerList)}  voice: {len(voiceMembers)}")
         for steamID in playerList:
             self.logger.debug(f"movePlayers2() - Querying steam ID - {steamID}")
             discordID = mydiscordbot.retrievePlayer2(steamID, map)
             self.logger.debug(f"movePlayers2() - query result: {discordID}")
-            if discordID > 0:
+            if int(discordID) > 0:
                 await self.movePlayer2(discordID, voiceMembers, channel, channelName)
             else:
                 self.logger.error(f"movePlayers2() - Unknown steamID - {steamID}")
@@ -1445,8 +1445,9 @@ class SimpleAsyncDiscord(threading.Thread):
         self.logger.debug(f"{playerName}{playerID} not in General")
 
     async def movePlayer2(self, discordID, voiceMembers, channel, channelName):
+        self.logger.debug( f"movePlayer2() - Inside movePlayer2 - {discordID}")
         for member in voiceMembers:
-            if member.ID == int(discordID):
+            if member.id == int(discordID):
                 self.logger.debug(f"Moving {member.name} to {channelName} voice channel")
                 #await member.move_to(channel)            
                 asyncio.run_coroutine_threadsafe(member.move_to(channel), loop=self.discord.loop)
