@@ -42,15 +42,15 @@ import requests
 import time
 import schedule
 
-plugin_version = "v3.0.10"
+plugin_version = "v3.0.12"
 
-DEFAULTSERVER = "45.63.79.72:27960"
+# DEFAULTSERVER = "45.63.79.72:27960"
 
-MAGDOLL_GUILD_ID = 347816482945892362
-MAGDOLL_CHANNEL_ID = 943596063665827850
-MAGDOLL_GENERAL_VOICE_ID = 999077709726634024
-MAGDOLL_RED_VOICE_ID = 347816482945892365
-MAGDOLL_BLUE_VOICE_ID = 985009149756710982
+# MAGDOLL_GUILD_ID = 347816482945892362
+# MAGDOLL_CHANNEL_ID = 943596063665827850
+# MAGDOLL_GENERAL_VOICE_ID = 999077709726634024
+# MAGDOLL_RED_VOICE_ID = 347816482945892365
+# MAGDOLL_BLUE_VOICE_ID = 985009149756710982
 
 DEVIL_GUILD_ID = 702558022752534579
 DEVIL_CHANNEL_ID = 702558022752534582
@@ -105,6 +105,13 @@ class mydiscordbot(minqlx.Plugin):
     * qlx_discordLogToSeparateLogfile (default: "0") enables extended logging for the discord library (logs to
     minqlx_discord.log in the homepath)
     * qlx_discord_extensions (default: "") discord extensions to load after initializing
+    * qlx_server_ip (default: "") QuakeLive server IP address to retrieve player info from
+    * qlx_server_friendly_ip (default: "") A clickable link to connect to the QuakeLive server
+    * qlx_discord_server_id (default: "") Disord server that the bot connects to
+    * qlx_status_channel_id (default: "") Discord channel for publishing status
+    * qlx_general_voice_id (default: "") Discord voice channel where players hang before matches start
+    * qlx_red_voice_id (default: "") Discord voice channel for red team
+    * qlx_blue_voice_id (default: "") Discord voice channel for blue team
     """
     def __init__(self, discord_client: SimpleAsyncDiscord = None):
         super().__init__()
@@ -127,6 +134,13 @@ class mydiscordbot(minqlx.Plugin):
         Plugin.set_cvar_once("qlx_discordLogToSeparateLogfile", "0")
         Plugin.set_cvar_once("qlx_discord_extensions", "")
         Plugin.set_cvar_once("qlx_mongo_password", "")
+        Plugin.set_cvar_once("qlx_server_ip", "")
+        Plugin.set_cvar_once("qlx_server_friendly_ip", "")
+        Plugin.set_cvar_once("qlx_discord_server_id", "")
+        Plugin.set_cvar_once("qlx_status_channel_id", "")
+        Plugin.set_cvar_once("qlx_general_voice_id", "")
+        Plugin.set_cvar_once("qlx_red_voice_id", "")
+        Plugin.set_cvar_once("qlx_blue_voice_id", "")
 
         # get the actual cvar values from the server
         self.discord_message_filters: set[str] = Plugin.get_cvar("qlx_discordQuakeRelayMessageFilters", set)
@@ -762,11 +776,11 @@ class SimpleAsyncDiscord(threading.Thread):
         Silly method to switch discord servers for running quick tests
         '''
         if serverName == "magdoll":
-            self.GUILD_ID = MAGDOLL_GUILD_ID
-            self.CHANNEL_ID = MAGDOLL_CHANNEL_ID
-            self.GENERAL_VOICE_ID = MAGDOLL_GENERAL_VOICE_ID
-            self.RED_VOICE_ID = MAGDOLL_RED_VOICE_ID
-            self.BLUE_VOICE_ID = MAGDOLL_BLUE_VOICE_ID
+            self.GUILD_ID = int(Plugin.get_cvar("qlx_discord_server_id"))
+            self.CHANNEL_ID = int(Plugin.get_cvar("qlx_status_channel_id"))
+            self.GENERAL_VOICE_ID = int(Plugin.get_cvar("qlx_general_voice_id"))
+            self.RED_VOICE_ID = int(Plugin.get_cvar("qlx_red_voice_id"))
+            self.BLUE_VOICE_ID = int(Plugin.get_cvar("qlx_blue_voice_id"))
         else:
             self.GUILD_ID = DEVIL_GUILD_ID
             self.CHANNEL_ID = DEVIL_CHANNEL_ID
@@ -945,14 +959,16 @@ class SimpleAsyncDiscord(threading.Thread):
     def queryServer( self, server = None):
         ''' This method attempts to make a request to the QL Syncore API
             to retrieve the players currently in the server provided. Defaults
-            to DEFAULTSERVER'''
+            to whatever is set in the server config'''
         if (server is None):
-            server = DEFAULTSERVER
+            server = Plugin.get_cvar("qlx_server_ip")
             
         try:
             apiurl = f"https://ql.syncore.org/api/qlstats/rankings?servers={server}"
             data = requests.get(apiurl)
             js = data.json()
+
+            self.logger.debug(f"queryServer() - Number of players in {server} is {js['rankedPlayerCount']}")
         except requests.exceptions.RequestException as e:
             self.logger.error("queryServer() - Connection error - %s", str(e))
             js = {}
@@ -1068,15 +1084,15 @@ class SimpleAsyncDiscord(threading.Thread):
         return changeInPlayers
 
     async def prettyPrint(self, ctx, server, count, players):
-        if server is None or server == DEFAULTSERVER:
-            server = "chi-pub.quakectf.com:27960"
+        if server is None:
+            server = Plugin.get_cvar("qlx_server_friendly_ip")
             
         if ctx is not None:
             temp = ""
             if count == 1:
-                temp = f"""`[{count}]` player in server steam://connect/{server}"""
+                temp = f"""`[{count}]` player in server {server}"""
             else:
-                temp = f"""`[{count}]` players in server steam://connect/{server}"""
+                temp = f"""`[{count}]` players in server {server}"""
             if count > 0:
                 temp = temp + f"""\n```{players}\n```"""
             await ctx.send(temp)
