@@ -1124,7 +1124,7 @@ class SimpleAsyncDiscord(threading.Thread):
         """
         overrides the default command error handler so that no exception is produced for command errors
 
-        Might be changed in the future to log those problems to the ´´`minqlx.logger```
+        Might be changed in the future to log those problems to the minqlx.logger
         """
 
     def is_discord_logged_in(self) -> bool:
