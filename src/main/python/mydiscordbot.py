@@ -42,7 +42,7 @@ import requests
 import time
 import schedule
 
-plugin_version = "v3.0.12"
+plugin_version = "v3.0.32"
 
 # DEFAULTSERVER = "45.63.79.72:27960"
 
@@ -112,6 +112,7 @@ class mydiscordbot(minqlx.Plugin):
     * qlx_general_voice_id (default: "") Discord voice channel where players hang before matches start
     * qlx_red_voice_id (default: "") Discord voice channel for red team
     * qlx_blue_voice_id (default: "") Discord voice channel for blue team
+    * qlx_censored_words (default: "") Comma separated list of words which will be cleansed out in chat. Example: slur1, slur2, slur3
     """
     def __init__(self, discord_client: SimpleAsyncDiscord = None):
         super().__init__()
@@ -141,6 +142,7 @@ class mydiscordbot(minqlx.Plugin):
         Plugin.set_cvar_once("qlx_general_voice_id", "")
         Plugin.set_cvar_once("qlx_red_voice_id", "")
         Plugin.set_cvar_once("qlx_blue_voice_id", "")
+        Plugin.set_cvar_once("qlx_censored_words", "")
 
         # get the actual cvar values from the server
         self.discord_message_filters: set[str] = Plugin.get_cvar("qlx_discordQuakeRelayMessageFilters", set)
@@ -165,6 +167,9 @@ class mydiscordbot(minqlx.Plugin):
         self.add_command("mapend", self.cmd_mapEnd, permission=3)
         self.add_command("addplayer", self.cmd_addPlayer, permission=3)
         self.add_command("addplayer2", self.cmd_addPlayer2, permission=3)
+        #self.add_command("nonvoice", self.cmd_nonVoice, permission=3)
+        self.add_command("voicecount",self.cmd_voiceCount, permission=3 )
+        
         #self.add_command("getsteam", self.cmd_getSteam, permission=3)
 
         self.STDMap: list = self.getSTDMap()
@@ -241,6 +246,7 @@ class mydiscordbot(minqlx.Plugin):
         item_details = collection_name.find()
         for item in item_details:
             try:
+                if item["DiscordID"] == discordID:
                     return item["SteamID"]
             except:
                 continue
@@ -451,8 +457,41 @@ class mydiscordbot(minqlx.Plugin):
 
         if channel.name in ["red_team_chat", "blue_team_chat"]:
             self.discord.relay_team_chat_message(player, handled_channels[channel.name], Plugin.clean_text(msg))
+        else:
+            self.discord.relay_chat_message(player, handled_channels[channel.name], Plugin.clean_text(msg))
+
+        censored = self.get_cvar("qlx_censored_words")
+        censored_split = censored.split(",")
+        
+        # remove censored words
+        newmsg = mydiscordbot.cleanse_message(msg, censored_split)
+
+        if newmsg == msg:
+            # nothing got censored. Don't do anything
             return
-        self.discord.relay_chat_message(player, handled_channels[channel.name], Plugin.clean_text(msg))
+        
+        if channel.name in ["red_team_chat", "blue_team_chat", "spectator_chat", "free_chat"]:
+            fullmsg = f"({player.name}): ^5{newmsg}"
+        else:
+            fullmsg = f"{player.name}: ^2{newmsg}"
+        Plugin.msg(fullmsg, channel)
+
+        # nothing else to send
+        return minqlx.RET_STOP_EVENT
+
+    @staticmethod
+    def cleanse_message( msg: str, censoredwords: list[str]) -> str:
+        spaced_slurs = [r"\s*".join(list(slur)) for slur in censoredwords]
+        pattern = re.compile(r"\b(?:{}|{})\b".format("|".join(map(re.escape, censoredwords)), "|".join(spaced_slurs)), re.IGNORECASE)
+        cleaned_text = pattern.sub("^1(**censored**)", msg)
+
+        # also check for partial matches
+        for word in censoredwords:
+            if word.lower() in cleaned_text.lower():
+                cleaned_text = "^1(**censored**)"
+                break
+
+        return cleaned_text
 
     @minqlx.delay(3)
     def handle_player_connect(self, player: minqlx.Player) -> None:
@@ -462,7 +501,7 @@ class mydiscordbot(minqlx.Plugin):
 
         :param: player: the player that connected
         """
-        content = f"_{discord.utils.escape_markdown(player.clean_name)} connected._"
+        content = f"_{discord.utils.escape_markdown(player.clean_name)} {player.steam_id} connected._"
         self.discord.relay_message(content)
         self.discord.setDirty()
 
@@ -525,7 +564,7 @@ class mydiscordbot(minqlx.Plugin):
 
         self.discord.relay_message(content)
 
-    @minqlx.delay(7)
+    @minqlx.delay(6)
     def handle_game_countdown_or_end(self, *_args, **_kwargs) -> None:
         """
         Handler called when the game is in countdown, i.e. about to start. This function mainly updates the topics of
@@ -546,10 +585,10 @@ class mydiscordbot(minqlx.Plugin):
         """
         Called to switch players around discord voice channels when a map is starting or ending
         """
-        time.sleep(5)
         if msgStartOrEnd == "mapstart":
-            self.discord.mapstart2()
+            self.discord.mapstart3()
         elif msgStartOrEnd == "mapend":
+            time.sleep(2)
             self.discord.mapend()
 
     @minqlx.thread
@@ -615,6 +654,44 @@ class mydiscordbot(minqlx.Plugin):
         self.msg(f"Retrieved {len(self.STDMap)} players")
 
         return minqlx.RET_NONE
+    
+    @minqlx.thread
+    def cmd_voiceCount(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
+        """
+        Handler of the !voiceCount command. The method lists the count of all players found in all voice channels
+        """
+        self.discord.GetSteamIDsOfPlayersInVoice()
+        
+        return minqlx.RET_NONE
+    
+
+    def getSteamIDsOfPlayersInVoice(self):
+        """
+        Helper method to get the steam IDs of all players in voice
+        """
+        voiceSteamIDs =  self.discord.GetSteamIDsOfPlayersInVoice()
+
+        return voiceSteamIDs
+    
+    @minqlx.thread
+    def cmd_nonVoice(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
+        """
+        Handler of the !nonVoice command. The method lists all players not in any voice channel
+        """
+        serverSteam = list([p.steam_id for p in self.players()])
+
+        voiceSteam = self.getSteamIDsOfPlayersInVoice()
+
+        nonVoicePlayers = findNonVoicePlayers(serverSteam, voiceSteam)
+
+        warnNonVoicePlayers( nonVoicePlayers )
+
+        # maybe after 30sec?
+        moveNonVoicePlayersToSpec( nonVoicePlayers )
+
+        return minqlx.RET_NONES
+    
+    
 
     @minqlx.thread
     def cmd_mapEnd(self, player: minqlx.Player, msg: list[str], _channel: minqlx.AbstractChannel) -> int:
@@ -1425,7 +1502,32 @@ class SimpleAsyncDiscord(threading.Thread):
         asyncio.run_coroutine_threadsafe(self.movePlayers2(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
 
         Plugin.msg("Map Start 2 - Switching players in discord from General to Red/Blue")
-        
+
+    def mapstart3(self):
+        self.logger.debug(f"mapstart3() - Inside mapstart3")
+        server = self.discord.get_guild(self.GUILD_ID)
+        generalChannel = discord.utils.get(server.voice_channels, id=self.GENERAL_VOICE_ID)
+        voiceMembers = generalChannel.members
+        if (len(voiceMembers) == 0 ):
+            # Absolutely nothing else to do if no one is in voice
+            self.logger.debug(f"mapstart3() - There are no members in general")
+            return
+
+        teams = Plugin.teams()
+        red = [str(player.steam_id) for player in teams["red"] ]
+        self.logger.debug(f"mapstart3() - There are {len(red)} members in red")
+        blue = [str(player.steam_id) for player in teams["blue"] ]
+        self.logger.debug(f"mapstart3() - There are {len(blue)} members in blue")
+
+        map = self.STDMap
+        self.logger.debug(f"There are {len(voiceMembers)} in general. {len(map)} in db")
+        blueChannel = discord.utils.get(server.voice_channels, id=self.BLUE_VOICE_ID)
+        redChannel = discord.utils.get(server.voice_channels, id=self.RED_VOICE_ID)
+
+        asyncio.run_coroutine_threadsafe(self.movePlayers2(blue, map, voiceMembers, blueChannel, "blue"), loop=self.discord.loop)
+        asyncio.run_coroutine_threadsafe(self.movePlayers2(red, map, voiceMembers, redChannel, "red"), loop=self.discord.loop)
+
+        Plugin.msg("Map Start 3 - Switching players in discord from General to Red/Blue")
 
     async def movePlayers(self, playerList, map, voiceMembers, channel, channelName):
         self.logger.debug( f"movePlayers() - Inside movePlayers - {len(playerList)}  voice: {len(voiceMembers)}")
@@ -1471,13 +1573,68 @@ class SimpleAsyncDiscord(threading.Thread):
 
         self.logger.debug(f"{member.name} with {discordID} not in General")
 
+
+    def GetSteamIDsOfPlayersInVoice(self):
+        self.logger.debug( f"GetSteamIDsOfPlayersInVoice() - Entering")
+        
+        steamIDs = []
+        server = self.discord.get_guild(self.GUILD_ID)
+        voiceChannels = server.voice_channels
+
+        for channel in voiceChannels:
+            for member in channel.members:
+                steamID = mydiscordbot.getSteamID2(member.id)
+                steamIDs.append(steamID)
+                                           
+        total = len(steamIDs)
+        self.logger.debug( f"GetSteamIDsOfPlayersInVoice() - Found {total} members")
+
+        Plugin.msg(f"GetSteamIDsOfPlayersInVoice - found {total} members")
+        return total
+
     def mapend(self):
         '''This method is called when a map ends.
-        It will automatically move players in Red/Blue channels
-        to general whether they like it or not!'''
+        It will spec players who are not in voice
+        It will also automatically move players in Red/Blue channels
+        to general whether they like it or not!
+        '''
+
+        self.moveNonVoicePlayersToSpec()
+
         asyncio.run_coroutine_threadsafe(self.movePlayersToGeneral(), loop=self.discord.loop)
 
         Plugin.msg("Map End - Switching players in discord back from Red/Blue to General")
+
+    def moveNonVoicePlayersToSpec(self):
+        teams = Plugin.teams()
+        players = [player for player in teams["red"] + teams["blue"]]
+
+        server = self.discord.get_guild(self.GUILD_ID)
+        voiceChannels = server.voice_channels
+
+        steamIDs = []
+        for channel in voiceChannels:
+            for member in channel.members:
+                steamID = int(mydiscordbot.getSteamID2(str(member.id)))
+                self.logger.debug( f"GetSteamIDsOfPlayersInVoice() - Appending {steamID} to list of voice players")
+                steamIDs.append(steamID)
+
+        total = len(steamIDs)
+        self.logger.debug( f"moveNonVoicePlayersToSpec() - Found {total} members in voice")
+
+        for player in players:
+            if player.steam_id not in steamIDs:
+                self.logger.debug( f"moveNonVoicePlayersToSpec() - Moving {player.steam_id} to spectator")
+
+                player.put("spectator")
+                # call the plugin specqueue as "sq"
+                SQ = minqlx.Plugin._loaded_plugins['specqueue']
+
+                self.logger.debug( f"moveNonVoicePlayersToSpec() - Loaded specqueue plugin")
+                # now you can use commands/funtions from SQ
+                SQ.add_to_queue(player)
+                player.tell("^3Join discord voice - ^4http://pub.quakectf.com ^3to retain your spot in the game")
+                self.logger.debug( f"moveNonVoicePlayersToSpec() - queued player")
         
     async def movePlayersToGeneral(self):
         
